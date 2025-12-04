@@ -11,27 +11,26 @@
   
   // Estado para almacenar los datos del día
   let todayData = $state([]);
-  let intervalId = null;
+  let ws;
   let lastUpdateTime = $state('');
   let nextUpdateTime = $state('');
   
-  // Función para generar un nuevo punto de datos
-  function generateNewDataPoint() {
+  // Función para agregar nuevo punto de datos desde WebSocket
+  function addNewDataPoint(data) {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
     
-    // Generar valores realistas con variación
     const newPoint = {
       time: timeStr,
-      pressure: 1.5 + (Math.random() - 0.5) * 0.6,
-      ph: 7.2 + (Math.random() - 0.5) * 1.0,
-      temperature: 25 + (Math.random() - 0.5) * 6
+      pressure: data.pressure,
+      humidity: data.humidity,
+      temperature: data.temperature
     };
     
     todayData = [...todayData, newPoint];
     lastUpdateTime = now.toLocaleTimeString('es-ES');
     
-    // Calcular próxima actualización
+    // Calcular próxima actualización (asumiendo cada 30 minutos)
     const nextUpdate = new Date(now.getTime() + 30 * 60 * 1000);
     nextUpdateTime = nextUpdate.toLocaleTimeString('es-ES');
     
@@ -40,7 +39,7 @@
       todayData = todayData.slice(-48);
     }
     
-    console.log('[v0] Nuevo dato registrado:', newPoint);
+    console.log('Nuevo dato recibido:', newPoint);
   }
   
   // Calcular tiempo restante para próxima actualización
@@ -66,16 +65,29 @@
   }
   
   onMount(() => {
-    // Generar primer dato inmediatamente
-    generateNewDataPoint();
-    
-    // Configurar actualización cada 30 minutos (1800000 ms)
-    // Para demostración, usamos 10 segundos
-    const updateInterval = 10000; // Cambiar a 1800000 para 30 minutos reales
-    
-    intervalId = setInterval(() => {
-      generateNewDataPoint();
-    }, updateInterval);
+    // Función para conectar WebSocket
+    function connectWebSocket() {
+      ws = new WebSocket('ws://localhost:8081');
+      ws.onopen = () => console.log('Conectado al WebSocket');
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          addNewDataPoint(data);
+        } catch (error) {
+          console.error('Error parseando datos del WebSocket:', error);
+        }
+      };
+      ws.onclose = () => {
+        console.log('Desconectado del WebSocket, reconectando en 5 segundos...');
+        setTimeout(connectWebSocket, 5000); // Reconectar automáticamente
+      };
+      ws.onerror = (error) => {
+        console.error('Error en WebSocket:', error);
+        ws.close();
+      };
+    }
+
+    connectWebSocket(); // Inicia conexión
     
     // Actualizar contador cada segundo
     const countdownInterval = setInterval(() => {
@@ -88,19 +100,19 @@
   });
   
   onDestroy(() => {
-    if (intervalId) {
-      clearInterval(intervalId);
+    if (ws) {
+      ws.close();
     }
   });
   
   // Preparar datos para las gráficas
   let pressureChartData = $derived(todayData.map(d => ({ time: d.time, value: d.pressure })));
-  let phChartData = $derived(todayData.map(d => ({ time: d.time, value: d.ph })));
+  let humidityChartData = $derived(todayData.map(d => ({ time: d.time, value: d.humidity })));
   let temperatureChartData = $derived(todayData.map(d => ({ time: d.time, value: d.temperature })));
   
   // Obtener valores actuales
   let currentPressure = $derived(todayData.length > 0 ? todayData[todayData.length - 1].pressure : 0);
-  let currentPh = $derived(todayData.length > 0 ? todayData[todayData.length - 1].ph : 0);
+  let currentHumidity = $derived(todayData.length > 0 ? todayData[todayData.length - 1].humidity : 0);
   let currentTemp = $derived(todayData.length > 0 ? todayData[todayData.length - 1].temperature : 0);
 </script>
 
@@ -197,10 +209,10 @@
       
       <Card class="border-l-4 border-l-yellow-500">
         <CardHeader class="pb-2">
-          <CardTitle class="text-sm">pH Actual</CardTitle>
+          <CardTitle class="text-sm">Humedad Actual</CardTitle>
         </CardHeader>
         <CardContent>
-          <p class="text-2xl font-bold">{currentPh.toFixed(2)}</p>
+          <p class="text-2xl font-bold">{currentHumidity.toFixed(2)} <span class="text-sm text-muted-foreground">%</span></p>
         </CardContent>
       </Card>
       
@@ -230,11 +242,11 @@
         
         <Card>
           <CardHeader>
-            <CardTitle>pH - Tiempo Real</CardTitle>
+            <CardTitle>Humedad - Tiempo Real</CardTitle>
           </CardHeader>
           <CardContent>
             <div class="h-[300px]">
-              <LineChart data={phChartData} color="rgb(234, 179, 8)" />
+              <LineChart data={humidityChartData} color="rgb(234, 179, 8)" />
             </div>
           </CardContent>
         </Card>
