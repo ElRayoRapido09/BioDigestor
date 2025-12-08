@@ -5,42 +5,14 @@
   import CardHeader from '$lib/components/ui/card-header.svelte';
   import CardTitle from '$lib/components/ui/card-title.svelte';
   import LineChart from './line-chart.svelte';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   
   let { user, onlogout, onnavigate } = $props();
   
   // Estado para almacenar los datos del día
   let todayData = $state([]);
-  let ws;
   let lastUpdateTime = $state('');
   let nextUpdateTime = $state('');
-  
-  // Función para agregar nuevo punto de datos desde WebSocket
-  function addNewDataPoint(data) {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-    
-    const newPoint = {
-      time: timeStr,
-      pressure: data.pressure,
-      humidity: data.humidity,
-      temperature: data.temperature
-    };
-    
-    todayData = [...todayData, newPoint];
-    lastUpdateTime = now.toLocaleTimeString('es-ES');
-    
-    // Calcular próxima actualización (asumiendo cada 30 minutos)
-    const nextUpdate = new Date(now.getTime() + 30 * 60 * 1000);
-    nextUpdateTime = nextUpdate.toLocaleTimeString('es-ES');
-    
-    // Mantener solo datos del día actual (máximo 48 puntos = 24 horas)
-    if (todayData.length > 48) {
-      todayData = todayData.slice(-48);
-    }
-    
-    console.log('Nuevo dato recibido:', newPoint);
-  }
   
   // Calcular tiempo restante para próxima actualización
   let timeRemaining = $state('');
@@ -65,29 +37,41 @@
   }
   
   onMount(() => {
-    // Función para conectar WebSocket
-    function connectWebSocket() {
-      ws = new WebSocket('ws://localhost:8081');
-      ws.onopen = () => console.log('Conectado al WebSocket');
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          addNewDataPoint(data);
-        } catch (error) {
-          console.error('Error parseando datos del WebSocket:', error);
+    // Función para obtener datos del backend
+    async function fetchSensorData() {
+      try {
+        const response = await fetch('/api/data');
+        const data = await response.json();
+        
+        // Convertir datos del backend a formato de la app
+        const formattedData = data.map(item => ({
+          time: new Date(item.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+          pressure: parseFloat(item.pressure),
+          humidity: parseFloat(item.humidity),
+          temperature: parseFloat(item.temperature)
+        }));
+        
+        // Mantener solo últimos 48 datos
+        todayData = formattedData.slice(-48);
+        
+        if (formattedData.length > 0) {
+          lastUpdateTime = new Date().toLocaleTimeString('es-ES');
+          const nextUpdate = new Date(Date.now() + 30 * 60 * 1000);
+          nextUpdateTime = nextUpdate.toLocaleTimeString('es-ES');
         }
-      };
-      ws.onclose = () => {
-        console.log('Desconectado del WebSocket, reconectando en 5 segundos...');
-        setTimeout(connectWebSocket, 5000); // Reconectar automáticamente
-      };
-      ws.onerror = (error) => {
-        console.error('Error en WebSocket:', error);
-        ws.close();
-      };
+        
+        console.log('Datos cargados:', formattedData.length);
+        console.log('Último dato:', formattedData[formattedData.length - 1]);
+      } catch (error) {
+        console.error('Error cargando datos:', error);
+      }
     }
-
-    connectWebSocket(); // Inicia conexión
+    
+    // Cargar datos inmediatamente
+    fetchSensorData();
+    
+    // Actualizar datos cada 5 segundos
+    const pollInterval = setInterval(fetchSensorData, 5000);
     
     // Actualizar contador cada segundo
     const countdownInterval = setInterval(() => {
@@ -95,14 +79,9 @@
     }, 1000);
     
     return () => {
+      clearInterval(pollInterval);
       clearInterval(countdownInterval);
     };
-  });
-  
-  onDestroy(() => {
-    if (ws) {
-      ws.close();
-    }
   });
   
   // Preparar datos para las gráficas
